@@ -45,6 +45,7 @@ struct Opts {
     #[clap(long = "top-level-only")]
     top_level_only: bool,
     /// If enabled, the tool will only delete tweets that are older than the given date
+    /// (in the format YYYY-MM-DD)
     #[clap(long = "before")]
     older_than: Option<NaiveDate>,
     /// Maxiumum number of concurrent deletion tasks
