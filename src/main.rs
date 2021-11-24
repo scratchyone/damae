@@ -44,11 +44,10 @@ struct Opts {
     /// If enabled, the tool will only delete top-level tweets
     #[clap(long = "top-level-only")]
     top_level_only: bool,
-
     /// If enabled, the tool will only delete tweets that are older than the given date
     #[clap(long = "before")]
     older_than: Option<NaiveDate>,
-    /// Maxiumum number of tweets to concurrent deletion tasks
+    /// Maxiumum number of concurrent deletion tasks
     #[clap(long = "max-tasks", default_value = "10")]
     max_tasks: usize,
 }
