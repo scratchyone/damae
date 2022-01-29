@@ -2,6 +2,7 @@ use chrono::TimeZone;
 use chrono::{DateTime, NaiveDate, NaiveTime};
 use clap::Parser;
 use colour::*;
+use dialoguer::Confirm;
 use egg_mode::{self, auth::verify_tokens};
 use futures::StreamExt;
 use indicatif::{self, ProgressBar};
@@ -32,9 +33,9 @@ struct Opts {
     /// Consumer secret for the twitter API
     consumer_secret: String,
     /// Access token for the twitter API
-    access_token: String,
+    access_token: Option<String>,
     /// Access token secret for the twitter API
-    access_token_secret: String,
+    access_token_secret: Option<String>,
     /// If enabled, the tool will avoid actually executing the delete operations
     #[clap(long = "dry-run")]
     dry_run: bool,
@@ -51,6 +52,9 @@ struct Opts {
     /// Maxiumum number of concurrent deletion tasks
     #[clap(long = "max-tasks", default_value = "10")]
     max_tasks: usize,
+    /// Bypass all confirmation prompts
+    #[clap(long, short)]
+    yes: bool,
 }
 
 #[tokio::main]
@@ -65,11 +69,39 @@ async fn main() {
     let mut tweets: Vec<WrappedTweet> = serde_json::from_str(tweets_str).unwrap();
 
     let con_token = egg_mode::KeyPair::new(opts.consumer_key.clone(), opts.consumer_secret.clone());
-    let access_token =
-        egg_mode::KeyPair::new(opts.access_token.clone(), opts.access_token_secret.clone());
-    let token = egg_mode::Token::Access {
-        consumer: con_token,
-        access: access_token,
+    let token = if opts.access_token.is_none() || opts.access_token_secret.is_none() {
+        let request_token = egg_mode::auth::request_token(&con_token, "oob")
+            .await
+            .unwrap();
+        let auth_url = egg_mode::auth::authorize_url(&request_token);
+        cyan_ln!(
+            "No access token provided, please authorize your account with this URL: {}",
+            auth_url
+        );
+        let mut editor = rustyline::Editor::<()>::new();
+        let auth_code = editor
+            .readline("Please enter the authorization PIN: ")
+            .unwrap();
+        let auth_code = auth_code.trim();
+        let (token, _, _) =
+            match egg_mode::auth::access_token(con_token, &request_token, auth_code).await {
+                Ok(t) => t,
+                Err(e) => {
+                    red_ln!("Invalid PIN");
+                    std::process::exit(1);
+                }
+            };
+        token
+    } else {
+        let access_token = egg_mode::KeyPair::new(
+            opts.access_token.clone().unwrap(),
+            opts.access_token_secret.clone().unwrap(),
+        );
+
+        egg_mode::Token::Access {
+            consumer: con_token,
+            access: access_token,
+        }
     };
 
     match verify_tokens(&token).await {
@@ -97,6 +129,18 @@ async fn main() {
 
     if opts.dry_run {
         yellow_ln!("🥸 Running in dry-run mode");
+    } else if !opts.yes
+        && !Confirm::new()
+            .with_prompt(format!(
+                "This will delete up to {} tweets permanently, are you sure you want to continue?",
+                tweets.len()
+            ))
+            .default(false)
+            .interact()
+            .unwrap()
+    {
+        red_ln!("Aborting");
+        std::process::exit(1);
     }
 
     green_ln!("🔎 Loaded {} tweets from archive", tweets.len());
